@@ -1,4 +1,4 @@
-from prompt_toolkit import PromptSession
+from prompt_toolkit import PromptSession, application
 from prompt_toolkit.patch_stdout import patch_stdout
 from pathlib import Path
 import threading
@@ -22,6 +22,7 @@ class App:
     _stop_connection = None
     _session = None
     _server_thread = None
+    _prompt = {"prompt": ""}
 
 
     def __init__(self):
@@ -39,37 +40,39 @@ class App:
 
         except KeyboardInterrupt:
             self.stop()
-        finally:
-            self._stop_connection.set()
-            self._stop_app.set()
-            try:
-                self._client_socket.shutdown(socket.SHUT_WR)
-                self._client_socket.close()
-            except Exception:
-                pass
-            finally:
-                self._client_socket = None
+        except Exception as e:
+            print("Ocurrió un error:", e)
+            self._shutdown_app()
         
 
-    def stop(self):
+    def _shutdown_app(self):
         self._stop_connection.set()
         self._stop_app.set()
+
         try:
             self._client_socket.shutdown(socket.SHUT_WR)
             self._client_socket.close()
+        except Exception:
+            pass
+        
+        try:
             self._server_socket.shutdown(socket.SHUT_WR)
             self._server_socket.close()
         except Exception:
             pass
-        
+
         self._client_socket = None
         self._server_socket = None
+    
+    
+    def stop(self):
+        self._shutdown_app()
         print("Saliendo...")
         time.sleep(0.2)
 
 
     def _handle_user_input(self):
-        user_input = self._session.prompt(PROMPT)
+        user_input = self._session.prompt(self._get_prompt)
 
         match self._app_state:
             case "DISCONNECTED":
@@ -106,6 +109,11 @@ class App:
 
             case "CONNECTED":
                 self._stop_connection.clear()
+                self._read_messages_thread = threading.Thread(target=self._receive_data, daemon=True)
+                self._read_messages_thread.start()
+        
+        app = application.current.get_app()
+        app.invalidate() # forzar la actualización del prompt
 
     
     def _wait_for_connections(self):
@@ -134,6 +142,16 @@ class App:
         self._set_state("CONNECTED")
     
 
+    def _get_prompt(self):
+        match self._app_state:
+            case "DISCONNECTED":
+                self._prompt["prompt"] = PROMPT
+            case "CONNECTED":
+                self._prompt["prompt"] = "Qué archivo desea enviar al cliente?: "
+        
+        return self._prompt["prompt"]
+    
+    
     def _receive_data(self):
         while not self._stop_connection.is_set():
             try:

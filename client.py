@@ -7,7 +7,7 @@ import time
 
 PORT = 60000
 BUFFER_SIZE = 4096
-MSG_PROMPT = "> "
+PROMPT = "> "
 
 
 class App:
@@ -45,13 +45,21 @@ class App:
                 self._client_socket = None
         
 
-    def stop(self):
+    def _shutdown_app(self):
         self._stop_connection.set()
         self._stop_app.set()
-        if self._client_socket:
+        
+        try:
             self._client_socket.shutdown(socket.SHUT_WR)
             self._client_socket.close()
-            self._client_socket = None
+        except Exception:
+            pass
+
+        self._client_socket = None
+    
+    
+    def stop(self):
+        self._shutdown_app()
         print("Saliendo...")
         time.sleep(0.2)
 
@@ -73,6 +81,9 @@ class App:
                     self._set_state("DISCONNECTED")
                     return
 
+                with patch_stdout():
+                    print("Utilice 'exit' para desconectarse del servidor")
+                
 
     def _set_state(self, new_state):
         self._app_state = new_state
@@ -81,10 +92,12 @@ class App:
             case "DISCONNECTED":
                 self._stop_connection.set()
                 self._host = None
-                if self._client_socket:
+                try:
                     self._client_socket.shutdown(socket.SHUT_WR)
                     self._client_socket.close()
                     self._client_socket = None
+                except Exception:
+                    pass
 
             case "CONNECTED":
                 self._stop_connection.clear()
@@ -124,7 +137,7 @@ class App:
             case "DISCONNECTED":
                 self._prompt["prompt"] = "Ingrese un host al cual conectarse (o exit para salir): "
             case "CONNECTED":
-                self._prompt["prompt"] = MSG_PROMPT
+                self._prompt["prompt"] = PROMPT
         
         return self._prompt["prompt"]
     
