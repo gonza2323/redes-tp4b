@@ -177,10 +177,10 @@ class App:
                     progress = 1 - remaining / file_size
                     if chunk:
                         f.write(chunk)
-                    print(f"\rRecibiendo archivo '{file_name}' ({file_size} bytes) de '{self._host}': {int(progress * 100)}%", end='')
+                    print(f"\rRecibiendo archivo '{file_name}' ({file_size} bytes) de '{self._host}': {int(progress * 100)}%   ", end='')
             
-                with patch_stdout():
-                    print("\nTransferencia completada")
+            with patch_stdout():
+                print("\nTransferencia completada")
         
         except KeyboardInterrupt:
             print("\nTransferencia cancelada")
