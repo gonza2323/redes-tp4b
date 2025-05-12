@@ -99,10 +99,12 @@ class App:
             case "DISCONNECTED":
                 self._stop_connection.set()
                 self._client_ip = None
-                if self._client_socket:
+                try:
                     self._client_socket.shutdown(socket.SHUT_WR)
                     self._client_socket.close()
-                    self._client_socket = None
+                except Exception:
+                    pass
+                self._client_socket = None
                 
                 self._server_thread = threading.Thread(target=self._wait_for_connections, daemon=True)
                 self._server_thread.start()
@@ -176,10 +178,10 @@ class App:
     def _process_path(self, path):
         file_path = Path(path).expanduser().resolve(strict=False)
 
-        with patch_stdout():
-            if file_path.is_file():
-                self._send_file(file_path)
-            else:
+        if file_path.is_file():
+            self._send_file(file_path)
+        else:
+            with patch_stdout():
                 print(f"Error: No se encontró un archivo en '{file_path}'")
     
 
@@ -203,13 +205,14 @@ class App:
 
             bytes_sent = 0
             progress = 0
-            with open(file_path, 'rb') as f, patch_stdout():
+            with open(file_path, 'rb') as f:
                 while chunk := f.read(BUFFER_SIZE):
                     self._client_socket.sendall(chunk)
                     bytes_sent += len(chunk)
                     progress = bytes_sent / size_in_bytes
                     print(f"\rEnviando archivo {file_name} ({size_in_bytes} bytes) a '{self._client_ip}': {int(progress * 100)}%", end='')
             
+            with patch_stdout():
                 print("\nTransferencia completada")
 
         except KeyboardInterrupt:
