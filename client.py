@@ -168,20 +168,19 @@ class App:
 
     def _receive_file(self, file_name, file_size):
         try:
-            with open(file_name, 'wb') as f, patch_stdout():
+            with open(file_name, 'wb') as f:
                 remaining = file_size
                 progress = 0
                 while remaining > 0:
-                    chunk_size = min(BUFFER_SIZE, remaining)
-                    chunk = self._client_socket.recv(chunk_size)
-                    remaining -= chunk_size
+                    chunk = self._client_socket.recv(BUFFER_SIZE)
+                    remaining -= len(chunk)
                     progress = 1 - remaining / file_size
+                    if chunk:
+                        f.write(chunk)
                     print(f"\rRecibiendo archivo '{file_name}' ({file_size} bytes) de '{self._host}': {int(progress * 100)}%", end='')
-                    if not chunk:
-                        break
-                    f.write(chunk)
             
-                print("\nTransferencia completada")
+                with patch_stdout():
+                    print("\nTransferencia completada")
         
         except KeyboardInterrupt:
             print("\nTransferencia cancelada")
