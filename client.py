@@ -6,12 +6,11 @@ import time
 
 
 PORT = 60000
-BUFFER_SIZE = 1024
+BUFFER_SIZE = 4096
 MSG_PROMPT = "> "
 
 
 class App:
-    _username = None
     _app_state = None
     _client_socket = None
     _host = None
@@ -31,7 +30,6 @@ class App:
 
     def start(self):
         try:
-            self._username = self._get_username()
             while not self._stop_app.is_set():
                 self._handle_user_input()
 
@@ -75,9 +73,6 @@ class App:
                     self._set_state("DISCONNECTED")
                     return
 
-                if (user_input.strip() != ''):
-                    self._send_message(user_input)
-
 
     def _set_state(self, new_state):
         self._app_state = new_state
@@ -93,7 +88,7 @@ class App:
 
             case "CONNECTED":
                 self._stop_connection.clear()
-                self._read_messages_thread = threading.Thread(target=self._read_messages, daemon=True)
+                self._read_messages_thread = threading.Thread(target=self._receive_data, daemon=True)
                 self._read_messages_thread.start()
         
         app = application.current.get_app()
@@ -134,53 +129,59 @@ class App:
         return self._prompt["prompt"]
     
     
-    def _read_messages(self):
+    def _receive_data(self):
         while not self._stop_connection.is_set():
             try:
-                data = self._client_socket.recv(BUFFER_SIZE)
+                FILE_NAME_MAX_LENGTH = 255
+                
+                data = self._client_socket.recv(FILE_NAME_MAX_LENGTH)
+                file_name = data.decode().split(':')[0]
+
+                if data == b'':
+                    self._handle_disconnect()
+
+                data = self._client_socket.recv(4)
+                size_in_bytes = int.from_bytes(data, byteorder="little")
+
+                if data == b'':
+                    self._handle_disconnect()
+
+                self._receive_file(file_name, size_in_bytes)
+
             except Exception as e:
                 self._handle_disconnect()
                 return
 
-            if data == b'':
-                self._handle_disconnect()
-                return
 
-            parsedData = data.decode().split(":")
-            user = parsedData[0]
-            msg = ":".join(parsedData[1:])
+    def _receive_file(self, file_name, file_size):
+        try:
+            with open(file_name, 'wb') as f, patch_stdout():
+                remaining = file_size
+                progress = 0
+                while remaining > 0:
+                    chunk_size = min(BUFFER_SIZE, remaining)
+                    chunk = self._client_socket.recv(chunk_size)
+                    remaining -= chunk_size
+                    progress = 1 - remaining / file_size
+                    print(f"\rRecibiendo archivo '{file_name}' ({file_size} bytes) de '{self._host}': {int(progress * 100)}%", end='')
+                    if not chunk:
+                        break
+                    f.write(chunk)
             
-            if data == '' or user == '' or msg == '':
-                continue
+                print("\nTransferencia completada")
+        
+        except KeyboardInterrupt:
+            print("\nTransferencia cancelada")
+        except Exception as e:
+            print("\nOcurrió un error:", e)
 
-            with patch_stdout():
-                print(f"{user} ({self._host}) dice: {msg}")
     
-    
-    def _send_message(self, message):
-        data = self._username + ":" + message
-        self._client_socket.send(data.encode())
-    
-
     def _handle_disconnect(self):
         if not self._stop_connection.is_set():
             with patch_stdout():
                 print(f"SE PERDIÓ LA CONEXIÓN A '{self._host.upper()}'")
             self._set_state("DISCONNECTED")
             return
-    
-
-    def _get_username(self):
-        username = None
-        while True:
-            username = self._session.prompt("Ingrese su nombre de usuario: ")
-            if not username:
-                print("El nombre de usuario no puede estar vacío")
-            elif ":" in username:
-                print("El nombre de usuario no puede contener dos puntos ':'")
-            else:
-                break
-        return username
 
 
 if __name__ == "__main__":

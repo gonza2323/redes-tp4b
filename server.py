@@ -14,7 +14,6 @@ PROMPT = "> "
 
 
 class App:
-    _username = None
     _app_state = None
     _server_socket = None
     _client_socket = None
@@ -22,7 +21,6 @@ class App:
     _stop_app = None
     _stop_connection = None
     _session = None
-    _read_messages_thread = None
     _server_thread = None
 
 
@@ -44,23 +42,28 @@ class App:
         finally:
             self._stop_connection.set()
             self._stop_app.set()
-            if self._client_socket:
+            try:
                 self._client_socket.shutdown(socket.SHUT_WR)
                 self._client_socket.close()
+            except Exception:
+                pass
+            finally:
                 self._client_socket = None
         
 
     def stop(self):
         self._stop_connection.set()
         self._stop_app.set()
-        if self._client_socket:
+        try:
             self._client_socket.shutdown(socket.SHUT_WR)
             self._client_socket.close()
-            self._client_socket = None
-        if self._server_socket:
             self._server_socket.shutdown(socket.SHUT_WR)
             self._server_socket.close()
-            self._server_socket = None
+        except Exception:
+            pass
+        
+        self._client_socket = None
+        self._server_socket = None
         print("Saliendo...")
         time.sleep(0.2)
 
@@ -130,8 +133,8 @@ class App:
         
         self._set_state("CONNECTED")
     
-    
-    def _read_messages(self):
+
+    def _receive_data(self):
         while not self._stop_connection.is_set():
             try:
                 data = self._client_socket.recv(BUFFER_SIZE)
@@ -142,37 +145,14 @@ class App:
             if data == b'':
                 self._handle_disconnect()
                 return
-
-            parsedData = data.decode().split(":")
-            user = parsedData[0]
-            msg = ":".join(parsedData[1:])
-            
-            if data == '' or user == '' or msg == '':
-                continue
-
-            with patch_stdout():
-                print(f"{user} ({self._client_ip}) dice: {msg}")
     
-
+    
     def _handle_disconnect(self):
         if not self._stop_connection.is_set():
             with patch_stdout():
                 print(f"SE PERDIÓ LA CONEXIÓN A '{self._client_ip.upper()}'")
             self._set_state("DISCONNECTED")
             return
-
-
-    def _get_username(self):
-        username = None
-        while True:
-            username = self._session.prompt("Ingrese su nombre de usuario: ")
-            if not username:
-                print("El nombre de usuario no puede estar vacío")
-            elif ":" in username:
-                print("El nombre de usuario no puede contener dos puntos ':'")
-            else:
-                break
-        return username
 
 
     def _process_path(self, path):
@@ -187,30 +167,37 @@ class App:
 
     def _send_file(self, file_path):
         try:
+            FILE_NAME_MAX_LENGTH = 255
             file_name = file_path.name
+            file_name_to_send = file_name
 
-            if len(file_name) < 256:
-                file_name += ':'
-                file_name += ' ' * (256 - len(file_name))
+            if len(file_name) > FILE_NAME_MAX_LENGTH:
+                raise Exception("El nombre del archivo es muy largo")
 
-            self._client_socket.sendall(file_name.encode())
+            if len(file_name) < FILE_NAME_MAX_LENGTH:
+                file_name_to_send += ':'
+                file_name_to_send += ' ' * (FILE_NAME_MAX_LENGTH - len(file_name_to_send))
+
+            self._client_socket.sendall(file_name_to_send.encode())
 
             size_in_bytes = os.path.getsize(file_path)
             self._client_socket.sendall(struct.pack('<I', size_in_bytes))
 
             bytes_sent = 0
-            print(f"Enviando archivo {file_name} ({size_in_bytes} bytes) a {self._client_ip}: {int(bytes_sent / size_in_bytes * 100)}%", end='')
-            with open(file_path, 'rb') as f:
+            progress = 0
+            with open(file_path, 'rb') as f, patch_stdout():
                 while chunk := f.read(BUFFER_SIZE):
                     self._client_socket.sendall(chunk)
-                    print(f"\rEnviando archivo {file_name} ({size_in_bytes} bytes) a {self._client_ip}: {int(bytes_sent / size_in_bytes * 100)}%", end='')
+                    bytes_sent += len(chunk)
+                    progress = bytes_sent / size_in_bytes
+                    print(f"\rEnviando archivo {file_name} ({size_in_bytes} bytes) a '{self._client_ip}': {int(progress * 100)}%", end='')
             
-            print("\nTransferencia completada")
+                print("\nTransferencia completada")
 
         except KeyboardInterrupt:
-            print("Transferencia cancelada")
+            print("\nTransferencia cancelada")
         except Exception as e:
-            print("Ocurrió un error: ", e)
+            print("\nOcurrió un error:", e)
 
 
 if __name__ == "__main__":
